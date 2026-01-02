@@ -1,0 +1,22 @@
+# Dados (Pasta que você mencionou)
+Arquivos/
+
+# Ambientes Virtuais
+.venv/
+venv/
+env/
+bin/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+*.csv
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Sistema
+Thumbs.db
+.DS_Store
