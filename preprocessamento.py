@@ -6,15 +6,17 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
 
-lista_dfs = []
+
 files = glob(r'Arquivos\indicadores-continuidade-coletivos-*.csv')
-def preprocessamento():
+
+def preparo(indicador):
+    lista_dfs = []
     for file in files:
         df = pd.read_csv(file, sep=';', encoding='iso-8859-1')
         for column in df.columns:
             column_new = column.strip()
             df[column] = df[column_new]
-        df = df[df['SigAgente'].str.strip()=='ELETROPAULO']
+        df = df[(df['SigAgente'].str.strip()=='ELETROPAULO') & (df['SigIndicador']==indicador)]
         df['VlrIndiceEnviado'] = df['VlrIndiceEnviado'].str.replace(',','.').astype('float')
         df['Data'] = pd.to_datetime(
         df['AnoIndice'].astype(str) + '-' + 
@@ -209,6 +211,7 @@ def preprocessamento():
 
         df['Regiao'] = df['Regiao'].map(conjuntos)
         df['Distribuidora'] = np.where(df['Data']>'2018-05-01', 'ENEL', 'Eletropaulo')
-        
-
-    return df
+        df['Data'] = pd.to_datetime(df['Data'])
+        df = df.sort_values('Data')
+        lista_dfs.append(df)
+    return pd.concat(lista_dfs, ignore_index=True)
