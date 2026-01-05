@@ -40,6 +40,7 @@ pytz==2025.2
 pyzmq==27.1.0
 referencing==0.37.0
 rpds-py==0.30.0
+scipy==1.16.3
 seaborn==0.13.2
 six==1.17.0
 stack-data==0.6.3
