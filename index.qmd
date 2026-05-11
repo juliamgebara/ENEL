@@ -1,0 +1,158 @@
+---
+title: "Análise de estabilidade da distribuição de energia pela ENEL em São Paulo"
+subtitle: "DEC e FEC de interrupções de origem externa à companhia e não programadas"
+author: "Julia Machado"
+date: "2026-05-11"
+format:
+  html:
+    embed-resources: true   # arquivo HTML único, sem dependências externas
+---
+
+# Objetivo do estudo
+
+Desde importantes quedas no serviço de energia ocorridas nos últimos anos na cidade de São Paulo e sua região metropolitana — com destaque para os episódios de 2022 a 2025 —, é comum ler nas redes sociais e mesmo ouvir pelas ruas da metrópole quão ineficiente é o serviço da concessionária Enel Distribuição São Paulo. Abundam as acusações de incapacidade de gestão das necessidades da capital.
+
+Diante dessa situação, contudo, é gritante a falta de análises mais profundas das ocorrências e de comparação à concessionária anterior, Eletropaulo. É certo que a gravidade na demora no restabelecimento de energia nas principais ocorrências é evidente para qualquer um que resida na região — não à toa, a empresa já foi notificada pela Agência Nacional de Energia Elétrica (ANEEL) —, mas carecem evidências concretas e quantificadas às acusações e comparações feitas quase cotidianamente no debate público.
+
+Este estudo pretende atacar essa demanda, visando a responder as seguintes questões:
+
+1.  A Enel é, factualmente, pior em número de interrupções e demora de restabelecimento do serviço do que a Eletropaulo?
+2.  As condições climáticas de São Paulo se deterioraram no período sob gestão da Enel, o que justificaria a possível piora dos indicadores?
+3.  O desempenho da Enel se distribuiu de forma uniforme ao longo da concessão, ou há evidências de deterioração progressiva em regiões específicas da cidade?
+
+# Metodologia
+
+## Fontes de dados
+
+Para fundamentar a análise, utilizamos duas bases de dados principais:
+
+- **Indicadores de continuidade coletivos da ANEEL** (2010–2025): indicadores mensais por conjunto de unidades consumidoras, abrangendo o período sob gestão da Eletropaulo e da ENEL. A data de corte adotada é **1º de junho de 2018**, dado que a ENEL assumiu formalmente a concessão em maio daquele ano. Os indicadores centrais analisados são o **DECXN** (Duração Equivalente de Interrupção por Unidade Consumidora de origem externa e não programada) e o **FECXN** (Frequência Equivalente de Interrupção de origem externa e não programada), que isolam as ocorrências imprevistas causadas por fatores externos à distribuidora — eventos que servem como proxy da resiliência operacional da empresa.
+
+- **Dados meteorológicos do INMET** (2016–2025): séries horárias da estação do Mirante de Santana (zona norte da capital), consolidadas em médias mensais, cobrindo precipitação, temperatura, umidade, velocidade de rajada máxima e demais variáveis climáticas.
+
+## Tratamento e preparo dos dados
+
+O arquivo `preprocessamento.py` realiza o tratamento das bases, incluindo:
+
+- Leitura e concatenação das duas décadas de dados da ANEEL, com padronização de encoding e separadores;
+- Mapeamento dos mais de 150 conjuntos de unidades consumidoras para macrorregiões da cidade (zonas norte, sul, leste, oeste, centro e municípios da região metropolitana);
+- Criação da variável `Distribuidora` (Eletropaulo ou ENEL) com base no corte temporal;
+- Incorporação do número de consumidores por conjunto para cálculo de DEC e FEC ponderados;
+- Consolidação dos dados horários do INMET em médias mensais, com tratamento de sentinelas (-9999) e normalização dos nomes das colunas.
+
+
+## Análise estatística
+
+A análise exploratória e os testes estatísticos são conduzidos no notebook `Indicadores.ipynb`, que emprega:
+
+- Visualizações de série temporal, boxplots e KDE plots para comparação entre períodos;
+- **Teste U de Mann-Whitney**: avaliação não paramétrica de diferença entre as distribuições de DEC e FEC nas duas gestões;
+- **d de Cohen**: medida do tamanho do efeito entre as médias;
+- **Teste de Levene**: verificação de homocedasticidade, utilizado para identificar diferenças de instabilidade (variância) entre as distribuidoras;
+- **Correlação de Spearman** e **regressão linear múltipla padronizada**: avaliação da relação entre variáveis climáticas e os indicadores de energia, incluindo lags de 1 mês e variável composta de calor úmido;
+- **Análise fatorial por região e por ano** (facet de barras anuais com média móvel de 2 anos): mapeamento da heterogeneidade geográfica da piora ou melhora dos indicadores.
+
+
+O notebook completo é facilmente acessível neste repositório. Abaixo apresentamos a análise de maneira mais didática e visual.
+
+```{python}
+
+%load_ext autoreload
+%autoreload 2
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import preprocessamento 
+import matplotlib.dates as mdates
+from datetime import datetime
+import seaborn as sns
+import plotly.express as px
+from scipy.stats import mannwhitneyu, ttest_ind
+from scipy.stats import levene
+from glob import glob
+import matplotlib.patches as mpatches
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
+``` 
+
+```{python}
+COR_ELETROPAULO = '#0066CC'
+COR_ENEL        = '#f54407'
+COR_FUNDO       = '#ffffff'
+COR_PAINEL      = '#c1c5c7'
+COR_TEXTO       = '#000000'
+COR_GRADE       = '#ffffff'
+ 
+plt.rcParams.update({
+    'font.family':      'monospace',
+    'axes.facecolor':   COR_PAINEL,
+    'figure.facecolor': COR_FUNDO,
+    'text.color':       COR_TEXTO,
+    'axes.labelcolor':  COR_TEXTO,
+    'xtick.color':      COR_TEXTO,
+    'ytick.color':      COR_TEXTO,
+    'axes.edgecolor':   COR_GRADE,
+    'grid.color':       COR_GRADE,
+    'grid.linewidth':   0.5,
+    'axes.titlesize':   9,
+    'axes.titleweight': 'bold',
+})
+```
+
+
+
+```{python}
+#| echo: false
+dec_ext_np = preprocessamento.preparo('DECXN') 
+#dec_ext_np_critico = preprocessamento.preparo('DECXNC') 
+num_cons = preprocessamento.preparo('NumCon') 
+# Trazendo número de consumidores para dentro do dataset de DECXN
+dec_ext_np = dec_ext_np.merge(num_cons[['Data', 'DscConjUndConsumidoras','VlrIndiceEnviado']], on=['Data', 'DscConjUndConsumidoras'])
+dec_ext_np = dec_ext_np.rename(columns={
+    'VlrIndiceEnviado_x': 'DEC', 
+    'VlrIndiceEnviado_y': 'Consumidores'
+})
+# Dada a presumível variação no número de clientes ao longo do tempo, criaremos uma coluna de DECXN ponderado para caso seja necessário
+total_consumidores_por_mes = dec_ext_np.groupby('Data')['Consumidores'].transform('sum')
+dec_ext_np['DEC Ponderado'] = (dec_ext_np['DEC'] * dec_ext_np['Consumidores']) / total_consumidores_por_mes# Primeira exploração visual dos dados
+fig = px.line(dec_ext_np, x='Data', y='DEC', title='DEC de Origem Externa e Não Programada')
+fig.update_xaxes(rangeslider_visible=True)
+fig.show()
+```
+
+<!-- # Principais achados
+
+## 1. Duração das interrupções (DECXN): a ENEL é mais instável nos picos
+
+A ENEL registrou uma média de DECXN **38% maior** do que a Eletropaulo nos meses com ocorrências de queda de energia. No entanto, até a mediana os valores são muito similares entre as duas gestões — o problema se concentra nos eventos extremos. O **teste de Levene** confirmou, com 95% de confiança (p = 0,022), que a distribuição da ENEL é estatisticamente mais instável: enquanto a rotina diária é comparável, os **picos de longa duração são significativamente mais frequentes e intensos** sob a gestão italiana.
+
+O teste de Mann-Whitney não rejeitou a hipótese nula (p = 0,795), o que reforça que a diferença não está no volume geral de ocorrências, mas na cauda direita da distribuição — os grandes eventos que dominam o debate público.
+
+## 2. Frequência de interrupções (FECXN): a ENEL melhorou
+
+Na frequência de quedas externas não programadas, a ENEL apresentou resultado **14,1% melhor** do que a Eletropaulo, com testes estatísticos que não apontam diferença significativa entre os grupos. A ENEL produz menos interrupções em número, mas quando elas acontecem, tendem a durar mais.
+
+## 3. Heterogeneidade geográfica
+
+A piora nos indicadores não se distribuiu de forma uniforme pela cidade:
+
+- **DECXN**: zonas leste, região metropolitana sudeste, centro e sudoeste apresentaram piora relevante; zona oeste, extremo norte e região metropolitana noroeste apresentaram melhora;
+- **FECXN**: zona leste, região metropolitana sudeste, zona centro-leste e sudoeste pioraram em frequência; a maioria das demais regiões melhorou.
+
+A análise de facets anuais revela que algumas regiões tiveram seus números fortemente afetados por outliers de 2025, enquanto outras mostram tendência gradual de deterioração desde o início da concessão — como a zona centro-leste (Mooca), que não registrava DEC externo não programado sob a Eletropaulo.
+
+## 4. O argumento climático não se sustenta
+
+As condições meteorológicas de São Paulo **não pioraram estatisticamente** durante o período de concessão da ENEL: nem chuva (p = 0,607) nem vento (p = 0,958) são significativamente mais intensos no período 2018–2025 em comparação a 2016–2018.
+
+A correlação entre variáveis climáticas e os indicadores de energia é baixa — modelos de regressão linear explicam apenas **~18% da variabilidade** de DEC e FEC. A correlação negativa observada entre velocidade de rajada e DEC/FEC revelou-se um **artefato de sazonalidade**: no inverno, há menos chuva e menos interrupções, mas os eventos que ocorrem não se associam a ventos fortes — tornando a relação espúria ao nível global. No verão, a precipitação mostra correlação positiva moderada com a frequência de quedas (FEC), mas não com a duração.
+
+# Conclusões
+
+Os dados contradizem parcialmente o senso comum: a ENEL **não é pior em número de interrupções** — na verdade, registra menos quedas em frequência do que a Eletropaulo. O problema real está na **capacidade de resposta** da empresa: quando ocorrem eventos externos graves, a duração do restabelecimento sob a ENEL é estatisticamente mais longa e mais imprevisível do que era sob a Eletropaulo, o que explica a percepção difundida de má qualidade do serviço.
+
+O agravamento das condições climáticas, frequentemente apontado como justificativa, **não encontra respaldo nos dados**: chuvas e ventos não se intensificaram no período de concessão da ENEL, e variáveis meteorológicas têm baixo poder explicativo sobre os indicadores de continuidade analisados.
+
+Por fim, a deterioração não é uniforme: regiões como a zona leste e a região metropolitana sudeste concentram a piora mais expressiva, enquanto outras áreas chegaram a melhorar com a mudança de gestão — o que sugere que eventuais ações corretivas teriam maior impacto se geograficamente direcionadas. -->

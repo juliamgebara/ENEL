@@ -215,3 +215,67 @@ def preparo(indicador):
         df = df.sort_values('Data')
         lista_dfs.append(df)
     return pd.concat(lista_dfs, ignore_index=True)
+
+
+COLUNAS_METEO = ['Precipitacao', 'Pressao', 'Radiacao', 'Temperatura',
+                 'Temperatura_Orvalho', 'Umidade', 'Direcao_Vento',
+                 'Velocidade_Rajada_Max', 'Vento_Velocidade']
+
+def meteo(arquivos):
+    lista_dfs = []
+    for arquivo in arquivos:
+        df = pd.read_csv(arquivo, sep=';', encoding='iso-8859-1', skiprows=8)
+        df.columns = (
+            df.columns
+            .str.strip()
+            .str.normalize('NFKD')
+            .str.encode('ascii', errors='ignore')
+            .str.decode('utf-8')
+            .str.upper()
+)
+        
+        df = df.rename(columns={'DATA': 'DATA (YYYY-MM-DD)'})
+
+        df['Data'] = pd.to_datetime(df['DATA (YYYY-MM-DD)']).dt.to_period('M').dt.to_timestamp()
+
+
+        df = df.rename(columns={
+        'PRECIPITACAO TOTAL, HORARIO (MM)':                        'Precipitacao',
+        'PRESSAO ATMOSFERICA AO NIVEL DA ESTACAO, HORARIA (MB)':  'Pressao',
+        'RADIACAO GLOBAL (KJ/M2)':                                 'Radiacao',
+        'TEMPERATURA DO AR - BULBO SECO, HORARIA (C)':            'Temperatura',
+        'TEMPERATURA DO PONTO DE ORVALHO (C)':                    'Temperatura_Orvalho',
+        'UMIDADE RELATIVA DO AR, HORARIA (%)':                     'Umidade',
+        'VENTO, DIRECAO HORARIA (GR) ( (GR))':                    'Direcao_Vento',
+        'VENTO, RAJADA MAXIMA (M/S)':                              'Velocidade_Rajada_Max',
+        'VENTO, VELOCIDADE HORARIA (M/S)':                         'Vento_Velocidade',
+    })
+
+        # Remover coluna fantasma
+        df = df.drop(columns=[c for c in df.columns if 'UNNAMED' in c])
+
+        # Manter só as colunas que interessam
+        colunas_presentes = ['Data'] + [c for c in COLUNAS_METEO if c in df.columns]
+        df = df[colunas_presentes]
+
+        # Converter para numérico (dados horários do INMET vêm com vírgula decimal)
+        for col in COLUNAS_METEO:
+            if col in df.columns:
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.replace(',', '.', regex=False)
+                    .replace('-9999', np.nan)        # sentinela do INMET
+                    .replace('-9999.0', np.nan)      # versão pós str.replace
+                )
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        lista_dfs.append(df)
+
+    meteo_df = pd.concat(lista_dfs, ignore_index=True)
+
+    # Agregar na média mensal
+    return meteo_df.groupby('Data')[COLUNAS_METEO].mean().reset_index()
+
+
+

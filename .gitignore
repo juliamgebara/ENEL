@@ -13,6 +13,7 @@ __pycache__/
 *$py.class
 
 *.csv
+*.png
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
@@ -20,3 +21,6 @@ __pycache__/
 # Sistema
 Thumbs.db
 .DS_Store
+
+/.quarto/
+**/*.quarto_ipynb
